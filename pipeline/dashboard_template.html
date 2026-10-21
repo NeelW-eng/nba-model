@@ -285,7 +285,9 @@ function multTag(m) { return m && Math.abs(m - 1) > 0.001 ? `<span class="mult">
 function drawTop10() {
   const L = D.top10 || [];
   if (!L.length) { $('top10').innerHTML = `<div class="empty"><b>No picks posted yet</b><p class="note">Picks appear after the morning run once Underdog has lines up for the day's games.</p></div>`; return; }
-  $('top10').innerHTML = L.map(p => `<div class="pk ${p.result === 'win' ? 'win' : p.result === 'loss' ? 'loss' : ''}">
+  const best = Math.max(...L.map(p => p.value || 0));
+  const warn = best < BE ? `<div class="empty"><b>No pick clears the 55% break-even today</b><p class="note">These are the best available, but each is a slight underdog against standard payouts. Early in the season the model leans on Underdog's own prices until it has seen players in their new roles, so edges are small. Playing fewer entries on days like this is reasonable.</p></div>` : '';
+  $('top10').innerHTML = warn + L.map(p => `<div class="pk ${p.result === 'win' ? 'win' : p.result === 'loss' ? 'loss' : ''}">
     <span class="rank">${p.rank ?? ''}</span>
     <div class="who"><div class="line">${esc(p.player)} <span class="dir ${p.word}">${p.word}</span> ${num(p.line, 1).replace(/\.0$/, '')} ${esc(p.stat_label)} ${multTag(p.mult)} ${resBadge(p)}</div>
       <div class="sub">${esc(p.team)} vs ${esc(p.opp)} · ${tip(p.kickoff)} · projection ${p.proj != null ? num(p.proj) : '–'}</div></div>

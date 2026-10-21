@@ -22,13 +22,19 @@ OPP_KEY = {'pts': 'pts', 'reb': 'reb', 'ast': 'ast', 'fg3m': 'fg3m', 'stl': 'stl
 LATE_LAST_SEASON = pd.Timestamp('2026-03-15')
 
 
-def blend(pc, pm):
+def model_weight(n_cur):
+    """How far the model may pull the price: 40% once a player has 8 games this season, 16% with none
+    (early on, projections still reflect last season's role while Underdog's price knows the new one)."""
+    return 0.4 * (0.4 + 0.6 * min(1.0, (n_cur or 0) / 8))
+
+
+def blend(pc, pm, wmax=0.4):
     pm = min(max(pm, 0.02), 0.98)
     if pc is None or not np.isfinite(pc):
         return 0.5 + 0.5 * (pm - 0.5)
     pc = min(max(pc, 0.02), 0.98)
     d = abs(norm.ppf(pm) - norm.ppf(pc))
-    return pc + 0.4 * float(np.exp(-(d / 0.8) ** 2)) * (pm - pc)
+    return pc + wmax * float(np.exp(-(d / 0.8) ** 2)) * (pm - pc)
 
 
 def match_players(lines, box):
@@ -122,6 +128,7 @@ def score(lines, box, models, meta, inj, now):
     fu = fu.set_index('pid')
 
     # score lines
+    n_cur = box[box.played & (box.season == D.SEASON)].groupby('pid').size().to_dict()
     recs = []
     hist = recent_games(box, set(fu.index))
     for r in lines.itertuples(index=False):
@@ -144,6 +151,8 @@ def score(lines, box, models, meta, inj, now):
             rec['min_proj'] = float(x['mu_min'])
             rec['n_career'] = int(x.n_career)
         rec['p_model'] = pm
+        rec['n_cur'] = n_cur.get(pid, 0) if pid else 0
+        wmax = model_weight(rec['n_cur'])
         best = None
         for side, sgn in (('higher', 1), ('lower', -1)):
             mult = getattr(r, f'{side}_mult')
@@ -154,7 +163,7 @@ def score(lines, box, models, meta, inj, now):
             if pms is None:
                 p = pc if pc is not None else None
             else:
-                p = blend(pc, pms)
+                p = blend(pc, pms, wmax)
             if p is None:
                 continue
             v = p * mult
@@ -215,6 +224,8 @@ def reasons(s, fu, hist, inj, box):
         out.append({'t': 'Second night of a back-to-back', 'ok': not up})
     if abs(x.exp_margin) >= 10:
         out.append({'t': f"Blowout risk (expected margin {x.exp_margin:+.0f})", 'ok': not up})
+    if s.n_cur < 3:
+        out.append({'t': f"Only {int(s.n_cur)} game{'s' if s.n_cur != 1 else ''} this season: leaning on Underdog's price", 'ok': False})
     if s.questionable:
         out.append({'t': 'Questionable on the injury report', 'ok': False})
     return out
