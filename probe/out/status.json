@@ -1,0 +1,41 @@
+{
+ "ud_v6": {
+  "status": 426,
+  "bytes": 222
+ },
+ "ud_v5": {
+  "status": 426,
+  "bytes": 222
+ },
+ "ud_v3": {
+  "status": 426,
+  "bytes": 222
+ },
+ "espn_inj": {
+  "status": 200,
+  "bytes": 908158
+ },
+ "espn_sb": {
+  "status": 200,
+  "bytes": 74889
+ },
+ "nba_cdn_sched": {
+  "status": 403,
+  "bytes": 425
+ },
+ "nba_cdn_sb": {
+  "status": 403,
+  "bytes": 445
+ },
+ "nba_stats": {
+  "error": "ReadTimeout(ReadTimeoutError(\"HTTPSConnectionPool(host='stats.nba.com', port=443): Read timed out. (read timeout=25)\"))"
+ },
+ "nba_inj_pdf_idx": {
+  "status": 200,
+  "bytes": 119301
+ },
+ "bref": {
+  "status": 200,
+  "bytes": 2366375
+ }
+}
