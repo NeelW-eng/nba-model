@@ -1,0 +1,17 @@
+{
+ "sp_v6": {
+  "error": "ConnectionError(MaxRetryError('HTTPSConnectionPool(host=\\'api.underdogsports.com\\', port=443): Max retries exceeded with url: /beta/v6/over_under_lines (Caused by NameResolutionError(\"HTTPSConnection("
+ },
+ "sp_v5": {
+  "error": "ConnectionError(MaxRetryError('HTTPSConnectionPool(host=\\'api.underdogsports.com\\', port=443): Max retries exceeded with url: /beta/v5/over_under_lines (Caused by NameResolutionError(\"HTTPSConnection("
+ },
+ "sp_v6_web": {
+  "error": "ConnectionError(MaxRetryError('HTTPSConnectionPool(host=\\'api.underdogsports.com\\', port=443): Max retries exceeded with url: /beta/v6/over_under_lines (Caused by NameResolutionError(\"HTTPSConnection("
+ },
+ "sp_v6_origin": {
+  "error": "ConnectionError(MaxRetryError('HTTPSConnectionPool(host=\\'api.underdogsports.com\\', port=443): Max retries exceeded with url: /beta/v6/over_under_lines (Caused by NameResolutionError(\"HTTPSConnection("
+ },
+ "sp_stats": {
+  "error": "ConnectionError(MaxRetryError('HTTPSConnectionPool(host=\\'stats.underdogsports.com\\', port=443): Max retries exceeded with url: /v1/sports/nba/players (Caused by NameResolutionError(\"HTTPSConnection(h"
+ }
+}
