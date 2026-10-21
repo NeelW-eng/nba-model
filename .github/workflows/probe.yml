@@ -1,0 +1,20 @@
+name: Probe data sources
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe.yml', 'probe/probe.py']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install requests
+      - run: python probe/probe.py
+      - run: |
+          git config user.name "tipoff-bot"; git config user.email "bot@users.noreply.github.com"
+          git add probe/out; git commit -m "probe results" || true; git push
