@@ -41,7 +41,7 @@ def load_models(box, force=False):
 
 def pick_dict(r, reasons=None):
     keys = ['player', 'team', 'opp', 'game', 'kickoff', 'match_id', 'stat', 'stat_label', 'line', 'word', 'mult',
-            'p', 'p_model', 'p_market', 'value', 'proj', 'rank', 'top10', 'game3', 'questionable', 'result', 'actual']
+            'p', 'p_model', 'p_market', 'value', 'proj', 'rank', 'top10', 'game3', 'questionable', 'units', 'result', 'actual']
     d = {k: r.get(k) for k in keys}
     d['reasons'] = reasons if reasons is not None else []
     return d
@@ -126,7 +126,7 @@ def write_board(now, slate, S, fu, up_vac, inj, games, log, status, box):
         for r in S.itertuples(index=False):
             all_lines.append({'player': r.player, 'team': r.team, 'opp': r.opp, 'stat': r.stat_label, 'line': r.line,
                               'word': r.word, 'mult': r.mult, 'p': r.p, 'pm': r.p_model_side, 'pc': r.p_market_side,
-                              'value': r.value, 'proj': getattr(r, 'proj', None), 'q': r.questionable, 'ok': r.pickable,
+                              'value': r.value, 'proj': getattr(r, 'proj', None), 'q': r.questionable, 'ok': r.pickable, 'u': r.units,
                               'started': r.started})
     # projections
     proj = []
@@ -161,7 +161,7 @@ def write_board(now, slate, S, fu, up_vac, inj, games, log, status, box):
     board = clean(board)
     # The dashboard's database caps each document at 256 KB, so the board ships as three documents:
     # board/current (picks, tracker, injuries), board/lines (every line, as compact rows), board/proj.
-    keys = ['player', 'team', 'opp', 'stat', 'line', 'word', 'mult', 'p', 'pm', 'pc', 'value', 'proj', 'q', 'ok', 'started']
+    keys = ['player', 'team', 'opp', 'stat', 'line', 'word', 'mult', 'p', 'pm', 'pc', 'value', 'proj', 'q', 'ok', 'started', 'u']
     rows = [[l.get(k) for k in keys] for l in board['lines']]
     core = {k: v for k, v in board.items() if k not in ('lines', 'proj')}
     core['n_lines'] = len(rows)

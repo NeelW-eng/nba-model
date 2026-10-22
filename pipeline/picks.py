@@ -16,6 +16,31 @@ from paths import DATA
 
 TOP_N, PER_GAME_TOP, PER_PLAYER_TOP, GAME_N = 10, 2, 1, 3
 BREAKEVEN = {'3-pick': 0.550, '4-pick': 0.562}
+LEG = 6 ** (1 / 3)   # a 3-pick standard entry pays 6x, i.e. 1.817x per pick
+# Units by value (win chance x payout multiplier) against the 55% a 3-pick entry needs.
+UNIT_TIERS = [(0.60, 2.0), (0.58, 1.5), (0.565, 1.0), (0.55, 0.5)]
+
+
+def units(value, questionable=False, n_cur=99, mult=1.0):
+    """Stake for one pick: 0.5u just past break-even up to 2u; 0 = pass.
+    Capped at 0.5u for Questionable players, 1u for players with under 3 games this season or long-odds sides."""
+    if value is None or not np.isfinite(value):
+        return 0.0
+    u = next((u for th, u in UNIT_TIERS if value >= th), 0.0)
+    if questionable:
+        u = min(u, 0.5)
+    if (n_cur is not None and n_cur < 3) or (mult is not None and mult > 1.3):
+        u = min(u, 1.0)
+    return u
+
+
+def unit_result(u, result, mult):
+    """Units won or lost, scoring each pick like a straight bet at its share of a 3-pick standard payout."""
+    if result == 'win':
+        return u * (LEG * (mult if mult and np.isfinite(mult) else 1.0) - 1)
+    if result == 'loss':
+        return -u
+    return 0.0
 OPP_KEY = {'pts': 'pts', 'reb': 'reb', 'ast': 'ast', 'fg3m': 'fg3m', 'stl': 'stl', 'blk': 'blk', 'tov': 'tov',
            'pra': 'pts', 'pr': 'pts', 'pa': 'pts', 'ra': 'reb', 'stocks': 'stl', 'fant': 'pts', 'dd': 'reb',
            'td': 'ast'}
@@ -182,6 +207,7 @@ def score(lines, box, models, meta, inj, now):
     S['pickable'] = S.higher_imp.notna() & S.lower_imp.notna() & S.mult.between(0.6, 1.6)
     S['agrees'] = S.p_model_side.fillna(0) >= 0.5
     S['started'] = pd.to_datetime(S.kickoff, utc=True) <= pd.Timestamp(now)
+    S['units'] = [units(v, q, n, m) for v, q, n, m in zip(S.value, S.questionable, S.n_cur, S.mult)]
     S['reasons'] = [reasons(s, fu, hist, inj, box) for s in S.itertuples(index=False)]
     return S.sort_values('value', ascending=False).reset_index(drop=True), fu, up_vac, hist
 

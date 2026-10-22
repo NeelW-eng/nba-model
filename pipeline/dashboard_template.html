@@ -88,6 +88,10 @@ details.why summary::before{content:"▸ "} details.why[open] summary::before{co
 .chip.ok{border-color:transparent;background:color-mix(in srgb,var(--court) 14%,var(--surface));color:var(--ink)}
 .chip.ok::before{content:"✓ ";color:var(--court);font-weight:700}
 
+.unit{font:600 11px var(--mono);padding:3px 7px;border-radius:4px;background:var(--ink);color:var(--bg);white-space:nowrap}
+.unit.pass{background:transparent;color:var(--muted);border:1px dashed var(--line)}
+.uchart svg{display:block;max-width:100%}
+.uchart .grid{stroke:var(--line);stroke-width:1}
 /* games */
 .games{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr));gap:14px}
 .game{padding:14px;gap:6px}
@@ -150,6 +154,7 @@ svg text{fill:var(--muted);font:11px var(--mono)}
   <section>
     <div class="sec-head"><h2 id="top-title">Tonight's Top 10</h2><span class="eyebrow">Ranked by value · max 2 per game · 1 per player</span></div>
     <div class="card" id="tracker"></div>
+    <div class="card" id="units"></div>
     <div class="list" id="top10"></div>
   </section>
 
@@ -185,7 +190,7 @@ svg text{fill:var(--muted);font:11px var(--mono)}
     <div class="sec-head"><h2>How the model is doing</h2><span class="eyebrow">This season, graded from box scores</span></div>
     <div class="grid2">
       <div class="card"><h3>By stat</h3><div class="scroll"><table id="by-stat"></table></div></div>
-      <div class="card"><h3>Win chance vs result</h3><div class="scroll"><table id="by-chance"></table></div><p class="note">If the model is honest, picks it gave a 55–60% chance should hit about 57% of the time.</p></div>
+      <div class="card"><h3>Win chance vs result</h3><div class="scroll"><table id="by-chance"></table></div><p class="note">If the model is honest, picks it gave a 55–60% chance should hit about 57% of the time.</p><h3>By stake</h3><div class="scroll"><table id="by-size"></table></div><p class="note">Bigger stakes should win more often. If 2u picks do no better than 0.5u picks, the sizing isn't earning its keep.</p></div>
       <div class="card"><h3>By player</h3><div class="scroll tall"><table id="by-player"></table></div></div>
       <div class="card"><h3>Higher vs Lower</h3><div class="scroll"><table id="by-side"></table></div><h3>Recent results</h3><div class="scroll tall"><table id="recent"></table></div></div>
     </div>
@@ -217,6 +222,17 @@ svg text{fill:var(--muted);font:11px var(--mono)}
       <div class="card">
         <h3>Win chance and value</h3>
         <p class="note">Each player gets a projection for every stat from LightGBM models trained on five seasons of box scores. The models use recent form, per-minute rates, the minutes trend, starter role, pace, the opponent's defense against his position, rest and back-to-backs, blowout risk, and teammates who are out. Each projection becomes a full range of outcomes, which gives a chance of going over Underdog's line. That chance is blended with Underdog's own price for the line, moving at most 40% toward the model and less when the two disagree a lot, since a big gap usually means news the model hasn't seen. Picks are ranked by value: win chance × the side's payout multiplier.</p>
+      </div>
+      <div class="card">
+        <h3>Unit sizes</h3>
+        <div class="ladder">
+          <div><span>Value 60%+</span><b>2u</b></div>
+          <div><span>58–60%</span><b>1.5u</b></div>
+          <div><span>56.5–58%</span><b>1u</b></div>
+          <div><span>55–56.5%</span><b>0.5u</b></div>
+          <div><span>Under 55% (break-even)</span><b>Pass</b></div>
+        </div>
+        <p class="note">Capped at 0.5u for Questionable players and at 1u for players with fewer than 3 games this season or a payout above 1.3x. Units are tracked as if each pick were its own bet: a win at a standard payout returns 0.82u per unit (its share of a 3-pick entry's 6x), scaled by the pick's multiplier, and a loss costs the stake. Underdog takes picks in entries, not one at a time, so this is a way to keep score, not an exact copy of what an entry pays.</p>
       </div>
       <div class="card">
         <h3>What a winning pick rate looks like</h3>
@@ -275,11 +291,48 @@ function drawTracker() {
   $('g3-record').textContent = g.n ? `Season ${g.w}–${g.l} · ${pct(g.pct,1)}` : '';
 }
 
+function drawUnits() {
+  const U = (D.tracker || {}).units || {by_day: []}, days = U.by_day || [];
+  const r = U.record || {n: 0};
+  const head = `<div class="sec-head"><h3>Units</h3><span class="eyebrow">Sized picks · 1u = your standard stake</span></div>
+    <div class="record">
+      <div class="stat"><div class="lbl">Units won</div><div class="big ${U.sized > 0 ? 'pos' : U.sized < 0 ? 'neg' : ''}">${signed(U.sized ?? 0)}u</div><div class="sub">${r.n ? `${r.w}–${r.l} on sized picks · ${num(U.risked, 1)}u risked` : 'No sized pick graded yet'}</div></div>
+      <div class="stat"><div class="lbl">Return per unit</div><div class="big">${U.roi == null ? '–' : signed(100 * U.roi, 1) + '%'}</div><div class="sub">units won ÷ units risked</div></div>
+      <div class="stat"><div class="lbl">Flat 1u on every Top 10</div><div class="big ${U.flat_top10 > 0 ? 'pos' : U.flat_top10 < 0 ? 'neg' : ''}">${signed(U.flat_top10 ?? 0)}u</div><div class="sub">including picks marked Pass</div></div>
+    </div>`;
+  if (!days.length) { $('units').innerHTML = head + '<p class="note">The chart starts once the first night is graded.</p>'; return; }
+  const W = 720, H = 220, L = 44, R = 12, T = 12, B = 30;
+  const vals = days.flatMap(d => [d.cum_sized, d.cum_flat, d.sized, 0]);
+  let lo = Math.min(...vals), hi = Math.max(...vals); if (hi - lo < 2) { const m = (hi + lo) / 2; lo = m - 1; hi = m + 1; }
+  const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+  const n = days.length, bw = Math.min(28, (W - L - R) / n * 0.6);
+  const x = i => L + (n === 1 ? (W - L - R) / 2 : i * (W - L - R) / (n - 1));
+  const y = v => T + (hi - v) * (H - T - B) / (hi - lo);
+  const step = Math.pow(10, Math.floor(Math.log10((hi - lo) / 4))), nice = [1, 2, 5].map(m => m * step).find(s => (hi - lo) / s <= 6) || step * 10;
+  const ticks = []; for (let v = Math.ceil(lo / nice) * nice; v <= hi; v += nice) ticks.push(+v.toFixed(6));
+  const line = k => days.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d[k]).toFixed(1)}`).join('');
+  const every = Math.max(1, Math.ceil(n / 8));
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Units won by day and cumulative">
+    ${ticks.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${signed(v, Math.abs(nice) < 1 ? 1 : 0)}</text>`).join('')}
+    <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink)" stroke-width="1"/>
+    ${days.map((d, i) => d.sized ? `<rect x="${x(i) - bw / 2}" width="${bw}" y="${Math.min(y(0), y(d.sized))}" height="${Math.max(1, Math.abs(y(d.sized) - y(0)))}" fill="${d.sized > 0 ? 'var(--win)' : 'var(--loss)'}" opacity=".55"><title>${esc(fmtDate(d.date))}: ${signed(d.sized)}u (${d.w}–${d.l})</title></rect>` : '').join('')}
+    <path d="${line('cum_flat')}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <path d="${line('cum_sized')}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
+    ${days.map((d, i) => `<circle cx="${x(i)}" cy="${y(d.cum_sized)}" r="${i === n - 1 ? 4.5 : 2.5}" fill="var(--accent)"><title>${esc(fmtDate(d.date))}: ${signed(d.cum_sized)}u total</title></circle>`).join('')}
+    <text x="${x(n - 1)}" y="${y(days[n - 1].cum_sized) - 9}" text-anchor="${n === 1 ? 'middle' : 'end'}" style="fill:var(--ink);font-weight:600">${signed(days[n - 1].cum_sized)}u</text>
+    ${days.map((d, i) => i % every === 0 || i === n - 1 ? `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${esc(new Date(d.date + 'T12:00:00').toLocaleDateString([], {month: 'numeric', day: 'numeric'}))}</text>` : '').join('')}
+  </svg>`;
+  $('units').innerHTML = head + `<div class="uchart">${svg}</div>
+    <div class="legend"><span><i class="sw" style="background:var(--accent);height:3px"></i>Total units (sized)</span><span><i class="sw" style="background:var(--win);opacity:.55"></i><i class="sw" style="background:var(--loss);opacity:.55"></i>Units won or lost that day</span><span><i class="sw" style="background:var(--muted);height:2px"></i>Flat 1u on every Top 10, for comparison</span></div>`;
+}
+
 function chips(p) {
   if (!p.reasons || !p.reasons.length) return '';
   return `<details class="why"><summary>Why this pick</summary><div class="chips">${p.reasons.map(r => `<span class="chip${r.ok ? ' ok' : ''}">${esc(r.t)}</span>`).join('')}</div></details>`;
 }
 function resBadge(p) { return p.result === 'win' || p.result === 'loss' ? `<span class="res ${p.result}">${p.result === 'win' ? 'Hit' : 'Miss'}${p.actual != null ? ' · ' + num(p.actual, 0) : ''}</span>` : (p.result ? `<span class="res">${esc(p.result)}</span>` : (p.locked ? '<span class="res">Locked</span>' : '')); }
+function unitTag(p) { const u = p.units ?? p.u; if (u == null) return ''; return u > 0 ? `<span class="unit" title="Suggested stake">${u}u</span>` : `<span class="unit pass" title="Below break-even">Pass</span>`; }
+const signed = (x, d=2) => x == null ? '–' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
 function multTag(m) { return m && Math.abs(m - 1) > 0.001 ? `<span class="mult">${num(m, 2)}x</span>` : ''; }
 
 function drawTop10() {
@@ -291,7 +344,7 @@ function drawTop10() {
     <span class="rank">${p.rank ?? ''}</span>
     <div class="who"><div class="line">${esc(p.player)} <span class="dir ${p.word}">${p.word}</span> ${num(p.line, 1).replace(/\.0$/, '')} ${esc(p.stat_label)} ${multTag(p.mult)} ${resBadge(p)}</div>
       <div class="sub">${esc(p.team)} vs ${esc(p.opp)} · ${tip(p.kickoff)} · projection ${p.proj != null ? num(p.proj) : '–'}</div></div>
-    <div class="chance"><b>${pct(p.p)}</b><small>value ${num(p.value, 3)}</small></div>
+    <div class="chance">${unitTag(p)}<b>${pct(p.p)}</b><small>value ${num(p.value, 3)}</small></div>
     ${chips(p)}</div>`).join('');
 }
 
@@ -302,19 +355,20 @@ function drawGames() {
   $('games').innerHTML = G.map(g => `<div class="card game"><div class="gh"><h3>${esc(g.game)}</h3><span class="eyebrow">${tip(g.kickoff)}</span></div>
     ${(g.picks || []).length ? g.picks.map(p => `<div class="gp ${p.result === 'win' ? 'win' : p.result === 'loss' ? 'loss' : ''}">
       <div class="t">${esc(p.player)} <span class="dir ${p.word}">${p.word}</span> ${num(p.line, 1).replace(/\.0$/, '')} ${esc(p.stat_label)} ${multTag(p.mult)} ${p.questionable ? '<span class="flag">Questionable</span>' : ''} ${top.has(p.player + p.stat_label + p.line) ? '<span class="star">★ TOP 10</span>' : ''} ${resBadge(p)}</div>
-      <div class="s">projection ${p.proj != null ? num(p.proj) : '–'} · value ${num(p.value, 3)}</div>
+      <div class="s">${unitTag(p)} projection ${p.proj != null ? num(p.proj) : '–'} · value ${num(p.value, 3)}</div>
       <span class="c">${pct(p.p)}</span>${chips(p)}</div>`).join('') : '<p class="note">No pick where the model and value line up.</p>'}</div>`).join('');
 }
 
 function table(el, head, rows) { $(el).innerHTML = `<thead><tr>${head.map(h => `<th${h[1] ? ' class="num"' : ''}>${h[0]}</th>`).join('')}</tr></thead><tbody>${rows.join('') || `<tr><td colspan="${head.length}" class="muted">Nothing graded yet</td></tr>`}</tbody>`; }
-const recCells = r => `<td class="num">${r.w}–${r.l}</td><td class="num ${r.pct == null ? '' : r.pct >= BE ? 'pos' : 'neg'}">${pct(r.pct, 1)}</td><td class="num">${pct(r.pay, 1)}</td>`;
+const recCells = r => `<td class="num">${r.w}–${r.l}</td><td class="num ${r.pct == null ? '' : r.pct >= BE ? 'pos' : 'neg'}">${pct(r.pct, 1)}</td><td class="num">${pct(r.pay, 1)}</td><td class="num ${r.u > 0 ? 'pos' : r.u < 0 ? 'neg' : ''}">${signed(r.u, 1)}</td>`;
 function drawReport() {
   const t = D.tracker || {};
-  table('by-stat', [['Stat'], ['W–L', 1], ['Hit', 1], ['Paid', 1]], (t.by_stat || []).map(r => `<tr><td>${esc(r.stat)}</td>${recCells(r)}</tr>`));
+  table('by-stat', [['Stat'], ['W–L', 1], ['Hit', 1], ['Paid', 1], ['Units', 1]], (t.by_stat || []).map(r => `<tr><td>${esc(r.stat)}</td>${recCells(r)}</tr>`));
   table('by-chance', [['Win chance'], ['Picks', 1], ['Expected', 1], ['Actual', 1]], (t.by_chance || []).map(r => `<tr><td>${pct(r.bucket)}–${pct(r.bucket + 0.05)}</td><td class="num">${r.n}</td><td class="num">${pct(r.exp, 1)}</td><td class="num">${pct(r.pct, 1)}</td></tr>`));
-  table('by-player', [['Player (2+ picks)'], ['W–L', 1], ['Hit', 1], ['Paid', 1]], (t.by_player || []).map(r => `<tr><td>${esc(r.player)}</td>${recCells(r)}</tr>`));
-  table('by-side', [['Side'], ['W–L', 1], ['Hit', 1], ['Paid', 1]], (t.by_side || []).map(r => `<tr><td>${esc(r.side)}</td>${recCells(r)}</tr>`));
-  table('recent', [['Date'], ['Pick'], ['Result', 1]], (D.recent || []).map(p => `<tr><td>${esc(fmtDate(p.kickoff ? new Date(p.kickoff).toLocaleDateString('en-CA') : ''))}</td><td>${esc(p.player)} ${p.word} ${p.line} ${esc(p.stat_label)}${p.top10 ? ' <span class="star">TOP 10</span>' : ''}</td><td class="num ${p.result === 'win' ? 'pos' : p.result === 'loss' ? 'neg' : ''}">${esc(p.result)}${p.actual != null ? ' · ' + num(p.actual, 0) : ''}</td></tr>`));
+  table('by-size', [['Stake'], ['W–L', 1], ['Hit', 1], ['Paid', 1], ['Units', 1]], (((t.units || {}).by_size) || []).map(r => `<tr><td>${r.units}u picks</td>${recCells(r)}</tr>`));
+  table('by-player', [['Player (2+ picks)'], ['W–L', 1], ['Hit', 1], ['Paid', 1], ['Units', 1]], (t.by_player || []).map(r => `<tr><td>${esc(r.player)}</td>${recCells(r)}</tr>`));
+  table('by-side', [['Side'], ['W–L', 1], ['Hit', 1], ['Paid', 1], ['Units', 1]], (t.by_side || []).map(r => `<tr><td>${esc(r.side)}</td>${recCells(r)}</tr>`));
+  table('recent', [['Date'], ['Pick'], ['Stake', 1], ['Result', 1]], (D.recent || []).map(p => `<tr><td>${esc(fmtDate(p.kickoff ? new Date(p.kickoff).toLocaleDateString('en-CA') : ''))}</td><td>${esc(p.player)} ${p.word} ${p.line} ${esc(p.stat_label)}${p.top10 ? ' <span class="star">TOP 10</span>' : ''}</td><td class="num">${p.units ? p.units + 'u' : 'Pass'}</td><td class="num ${p.result === 'win' ? 'pos' : p.result === 'loss' ? 'neg' : ''}">${esc(p.result)}${p.actual != null ? ' · ' + num(p.actual, 0) : ''}</td></tr>`));
   const bt = D.backtest || {}, NAMES = {pts:'Points',reb:'Rebounds',ast:'Assists',fg3m:'3-Pointers',pra:'Pts+Rebs+Asts',pr:'Pts+Rebs',pa:'Pts+Asts',ra:'Rebs+Asts',stl:'Steals',blk:'Blocks',tov:'Turnovers',stocks:'Blks+Stls'};
   $('bt').innerHTML = `<thead><tr><th>Stat</th><th class="num">Games</th><th class="num">Model miss</th><th class="num">Line miss</th><th class="num">Picks ≥55%</th><th class="num">Hit</th><th class="num">Picks ≥60%</th><th class="num">Hit</th></tr></thead><tbody>${Object.entries(bt).map(([k, r]) => `<tr><td>${NAMES[k] || k}</td><td class="num">${r.n.toLocaleString()}</td><td class="num">${num(r.mae_model, 2)}</td><td class="num">${num(r.mae_line, 2)}</td><td class="num">${r.hit_at_55[0].toLocaleString()}</td><td class="num">${pct(r.hit_at_55[1], 1)}</td><td class="num">${r.hit_at_60[0].toLocaleString()}</td><td class="num">${pct(r.hit_at_60[1], 1)}</td></tr>`).join('')}</tbody>`;
 }
@@ -333,7 +387,7 @@ function drawAll() {
   const q = $('all-filter').value.trim().toLowerCase();
   const L = (D.lines || []).filter(l => !q || `${l.player} ${l.team} ${l.opp} ${l.stat}`.toLowerCase().includes(q));
   $('all-count').textContent = `${(D.lines || []).length || D.n_lines || 0} lines`;
-  $('all').innerHTML = `<thead><tr><th>Player</th><th>Team</th><th>Stat</th><th class="num">Line</th><th>Pick</th><th class="num">Pays</th><th class="num">Win chance</th><th class="num">Model</th><th class="num">Underdog</th><th class="num">Value</th><th class="num">Proj</th></tr></thead><tbody>${L.slice(0, 600).map(l => `<tr class="${l.ok && l.pm != null ? '' : 'dim'}"><td>${esc(l.player)}${l.q ? ' <span class="flag">Q</span>' : ''}</td><td>${esc(l.team)} v ${esc(l.opp)}</td><td>${esc(l.stat)}</td><td class="num">${l.line}</td><td>${l.word}</td><td class="num">${num(l.mult, 2)}x</td><td class="num">${pct(l.p, 1)}</td><td class="num">${pct(l.pm, 1)}</td><td class="num">${pct(l.pc, 1)}</td><td class="num ${l.value >= BE && l.ok ? 'pos' : ''}">${num(l.value, 3)}</td><td class="num">${l.proj != null && l.stat.indexOf('Double') < 0 ? num(l.proj) : '–'}</td></tr>`).join('')}</tbody>`;
+  $('all').innerHTML = `<thead><tr><th>Player</th><th>Team</th><th>Stat</th><th class="num">Line</th><th>Pick</th><th class="num">Pays</th><th class="num">Win chance</th><th class="num">Model</th><th class="num">Underdog</th><th class="num">Value</th><th class="num">Units</th><th class="num">Proj</th></tr></thead><tbody>${L.slice(0, 600).map(l => `<tr class="${l.ok && l.pm != null ? '' : 'dim'}"><td>${esc(l.player)}${l.q ? ' <span class="flag">Q</span>' : ''}</td><td>${esc(l.team)} v ${esc(l.opp)}</td><td>${esc(l.stat)}</td><td class="num">${l.line}</td><td>${l.word}</td><td class="num">${num(l.mult, 2)}x</td><td class="num">${pct(l.p, 1)}</td><td class="num">${pct(l.pm, 1)}</td><td class="num">${pct(l.pc, 1)}</td><td class="num ${l.value >= BE && l.ok ? 'pos' : ''}">${num(l.value, 3)}</td><td class="num">${l.ok && l.pm != null && l.u ? l.u + 'u' : ''}</td><td class="num">${l.proj != null && l.stat.indexOf('Double') < 0 ? num(l.proj) : '–'}</td></tr>`).join('')}</tbody>`;
 }
 
 const PSTATS = [['pts','Points'],['reb','Rebounds'],['ast','Assists'],['fg3m','3-Pointers'],['pra','PRA'],['stl','Steals'],['blk','Blocks']];
@@ -348,7 +402,7 @@ function unpack(data) {
   if (data && data.rows && data.keys) data.lines = data.rows.map(r => Object.fromEntries(data.keys.map((k, i) => [k, r[i]])));
   return data;
 }
-function render(data) { D = data; drawStatus(); drawTracker(); drawTop10(); drawGames(); drawReport(); drawInjuries(); drawAll(); drawProj(); }
+function render(data) { D = data; drawStatus(); drawTracker(); drawUnits(); drawTop10(); drawGames(); drawReport(); drawInjuries(); drawAll(); drawProj(); }
 $('tabs').addEventListener('click', e => { const k = e.target.dataset?.k; if (k) { cur = k; drawProj(); } });
 $('all-filter').addEventListener('input', drawAll);
 render(EMBEDDED);

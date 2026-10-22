@@ -8,7 +8,7 @@ import data as D
 LOG = os.path.join(DATA, 'picks_log.csv')
 COLS = ['date', 'logged', 'kickoff', 'match_id', 'game', 'player', 'pid', 'team', 'opp', 'stat', 'stat_label', 'line',
         'side', 'word', 'mult', 'p', 'p_model', 'p_market', 'value', 'proj', 'top10', 'rank', 'game3',
-        'questionable', 'result', 'actual']
+        'questionable', 'units', 'result', 'actual']
 
 
 def load():
@@ -18,6 +18,10 @@ def load():
     for c in ('top10', 'game3', 'questionable'):
         d[c] = d[c].fillna(False).astype(str).str.lower().isin(['true', '1'])
     d['result'] = d['result'].astype(object)
+    # picks logged before unit sizing existed get the size their value implies
+    import picks as PK
+    miss = d.units.isna()
+    d.loc[miss, 'units'] = [PK.units(v, q, 99, m) for v, q, m in zip(d.value[miss], d.questionable[miss], d.mult[miss])]
     return d
 
 
@@ -71,13 +75,20 @@ def grade(box_cur, now):
     return d
 
 
+def _pl(g, flat=False):
+    import picks as PK
+    u = 1.0 if flat else None
+    return float(sum(PK.unit_result(u if flat else r.units, r.result, r.mult) for r in g.itertuples(index=False)))
+
+
 def _rec(g):
     w, l = int((g.result == 'win').sum()), int((g.result == 'loss').sum())
     n = w + l
     pay = float(g[g.result == 'win'].mult.sum() / n) if n else None
     return {'w': w, 'l': l, 'v': int(g.result.isin(['void', 'push']).sum()), 'n': n,
             'pct': round(w / n, 3) if n else None, 'pay': round(pay, 3) if pay is not None else None,
-            'exp': round(float(g[g.result.isin(['win', 'loss'])].p.mean()), 3) if n else None}
+            'exp': round(float(g[g.result.isin(['win', 'loss'])].p.mean()), 3) if n else None,
+            'u': round(_pl(g), 2), 'risk': round(float(g[g.result.isin(['win', 'loss'])].units.sum()), 2)}
 
 
 def summary(d):
@@ -90,4 +101,19 @@ def summary(d):
     g['bucket'] = (np.floor(g.p.astype(float) * 20) / 20).round(2)
     out['by_chance'] = [{'bucket': float(k), **_rec(x)} for k, x in g.groupby('bucket')]
     out['by_side'] = [{'side': k, **_rec(x)} for k, x in g.groupby('word')]
+    # units: every logged pick at its size (Top 10 and game picks; a pick in both counts once),
+    # plus a flat 1u on every Top 10 pick for comparison
+    days, cs, cf = [], 0.0, 0.0
+    for k, x in g.groupby('date'):
+        sized = x[x.units > 0]
+        ds, df = _pl(sized), _pl(x[x.top10], flat=True)
+        cs += ds; cf += df
+        days.append({'date': k, 'sized': round(ds, 2), 'flat': round(df, 2), 'cum_sized': round(cs, 2),
+                     'cum_flat': round(cf, 2), 'n_sized': int(sized.result.isin(['win', 'loss']).sum()),
+                     'w': int((sized.result == 'win').sum()), 'l': int((sized.result == 'loss').sum())})
+    sized = g[g.units > 0]
+    risk = float(sized[sized.result.isin(['win', 'loss'])].units.sum())
+    out['units'] = {'sized': round(cs, 2), 'flat_top10': round(cf, 2), 'risked': round(risk, 2),
+                    'roi': round(cs / risk, 4) if risk else None, 'record': _rec(sized), 'by_day': days,
+                    'by_size': [{'units': float(k), **_rec(x)} for k, x in sized.groupby('units')]}
     return out
