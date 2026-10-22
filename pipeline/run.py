@@ -159,7 +159,19 @@ def write_board(now, slate, S, fu, up_vac, inj, games, log, status, box):
         'calibration': bt['calibration'],
     }
     board = clean(board)
-    json.dump(board, open(os.path.join(DATA, 'board.json'), 'w'), allow_nan=False)
+    # The dashboard's database caps each document at 256 KB, so the board ships as three documents:
+    # board/current (picks, tracker, injuries), board/lines (every line, as compact rows), board/proj.
+    keys = ['player', 'team', 'opp', 'stat', 'line', 'word', 'mult', 'p', 'pm', 'pc', 'value', 'proj', 'q', 'ok', 'started']
+    rows = [[l.get(k) for k in keys] for l in board['lines']]
+    core = {k: v for k, v in board.items() if k not in ('lines', 'proj')}
+    core['n_lines'] = len(rows)
+    docs = {'board.json': core,
+            'board_lines.json': {'generated': board['generated'], 'keys': keys, 'rows': rows},
+            'board_proj.json': {'generated': board['generated'], 'proj': board['proj']}}
+    for fn, doc in docs.items():
+        txt = json.dumps(doc, allow_nan=False, separators=(',', ':'))
+        open(os.path.join(DATA, fn), 'w').write(txt)
+        print(fn, len(txt.encode()), 'bytes')
     tpl = open(os.path.join(os.path.dirname(__file__), 'dashboard_template.html')).read()
     html = tpl.replace('/*DATA*/null', json.dumps(board, allow_nan=False))
     open(os.path.join(SITE, 'tipoff_edge.html'), 'w').write(html)

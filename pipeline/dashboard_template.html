@@ -332,7 +332,7 @@ function drawInjuries() {
 function drawAll() {
   const q = $('all-filter').value.trim().toLowerCase();
   const L = (D.lines || []).filter(l => !q || `${l.player} ${l.team} ${l.opp} ${l.stat}`.toLowerCase().includes(q));
-  $('all-count').textContent = `${(D.lines || []).length} lines`;
+  $('all-count').textContent = `${(D.lines || []).length || D.n_lines || 0} lines`;
   $('all').innerHTML = `<thead><tr><th>Player</th><th>Team</th><th>Stat</th><th class="num">Line</th><th>Pick</th><th class="num">Pays</th><th class="num">Win chance</th><th class="num">Model</th><th class="num">Underdog</th><th class="num">Value</th><th class="num">Proj</th></tr></thead><tbody>${L.slice(0, 600).map(l => `<tr class="${l.ok && l.pm != null ? '' : 'dim'}"><td>${esc(l.player)}${l.q ? ' <span class="flag">Q</span>' : ''}</td><td>${esc(l.team)} v ${esc(l.opp)}</td><td>${esc(l.stat)}</td><td class="num">${l.line}</td><td>${l.word}</td><td class="num">${num(l.mult, 2)}x</td><td class="num">${pct(l.p, 1)}</td><td class="num">${pct(l.pm, 1)}</td><td class="num">${pct(l.pc, 1)}</td><td class="num ${l.value >= BE && l.ok ? 'pos' : ''}">${num(l.value, 3)}</td><td class="num">${l.proj != null && l.stat.indexOf('Double') < 0 ? num(l.proj) : '–'}</td></tr>`).join('')}</tbody>`;
 }
 
@@ -344,6 +344,10 @@ function drawProj() {
   $('proj').innerHTML = `<thead><tr><th>Player</th><th>Team</th><th>Pos</th><th class="num">Minutes</th><th class="num">Median</th><th class="num">Middle half</th></tr></thead><tbody>${P.map(r => `<tr><td>${esc(r.player)}${r.vac >= 10 ? ' <span class="star">▲</span>' : ''}</td><td>${esc(r.team)} v ${esc(r.opp)}</td><td>${esc(r.pos)}</td><td class="num">${num(r.min, 0)}</td><td class="num">${num(r[cur][1], 0)}</td><td class="num">${num(r[cur][0], 0)}–${num(r[cur][2], 0)}</td></tr>`).join('')}</tbody>`;
 }
 
+function unpack(data) {
+  if (data && data.rows && data.keys) data.lines = data.rows.map(r => Object.fromEntries(data.keys.map((k, i) => [k, r[i]])));
+  return data;
+}
 function render(data) { D = data; drawStatus(); drawTracker(); drawTop10(); drawGames(); drawReport(); drawInjuries(); drawAll(); drawProj(); }
 $('tabs').addEventListener('click', e => { const k = e.target.dataset?.k; if (k) { cur = k; drawProj(); } });
 $('all-filter').addEventListener('input', drawAll);
@@ -407,25 +411,39 @@ $('ent-list').addEventListener('click', async ev => {
 
 /* ---------- live board ---------- */
 const btn = $('reload'), note = $('reload-note');
-let boardRef = null, shownGen = EMBEDDED.generated;
+let boardRef = null, linesRef = null, projRef = null, shownGen = EMBEDDED.generated;
 const stamp = () => new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+let parts = {};
+function applyPart(name, snap) {
+  if (!snap || !snap.exists) return;
+  const d = unpack(snap.data());
+  parts[name] = d;
+  if (d.generated !== shownGen) return;   // the matching picks document will merge it
+  if (name === 'lines') { D.lines = d.lines; drawAll(); } else { D.proj = d.proj; drawProj(); }
+}
 function apply(snap, manual) {
   if (snap && snap.exists) {
     const data = snap.data(), newer = data.generated && data.generated !== shownGen;
-    if (newer || manual) { shownGen = data.generated; render(data); }
+    if (newer || manual) {
+      shownGen = data.generated;
+      const next = {...data, lines: (parts.lines && parts.lines.generated === data.generated) ? parts.lines.lines : D.lines, proj: (parts.proj && parts.proj.generated === data.generated) ? parts.proj.proj : D.proj};
+      render(next);
+    }
     note.textContent = (newer ? 'New picks loaded · ' : 'Up to date · ') + 'checked ' + stamp();
   } else if (manual) note.textContent = 'Up to date · checked ' + stamp();
 }
 btn.addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = 'Checking…';
-  try { if (boardRef) apply(await boardRef.get(), true); else note.textContent = 'Live updates unavailable here · showing the last published picks'; }
+  try { if (boardRef) { applyPart('lines', await linesRef.get()); applyPart('proj', await projRef.get()); apply(await boardRef.get(), true); } else note.textContent = 'Live updates unavailable here · showing the last published picks'; }
   catch (e) { note.textContent = 'Could not reach the latest picks. Try again in a moment.'; }
   finally { btn.disabled = false; btn.textContent = '↻ Reload picks'; }
 });
 (async () => {
   const db = window.claude && window.claude.use ? await window.claude.use('db') : null;
   if (!db) { note.textContent = 'Showing the last published picks'; $('ent-msg').textContent = 'Entry logging works on the published page in Claude.'; return; }
-  boardRef = db.doc('board/current');
+  boardRef = db.doc('board/current'); linesRef = db.doc('board/lines'); projRef = db.doc('board/proj');
+  linesRef.onSnapshot(s => applyPart('lines', s), () => {});
+  projRef.onSnapshot(s => applyPart('proj', s), () => {});
   boardRef.onSnapshot(s => apply(s, false), () => { note.textContent = 'Live updates paused · use Reload'; });
   entCol = db.collection('entries');
   entCol.onSnapshot(q => { entries = q.docs.map(d => ({id: d.id, ...d.data()})); drawEntries(); }, () => { $('ent-msg').textContent = 'Entries could not load. Reload the page to try again.'; });
