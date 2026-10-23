@@ -131,7 +131,16 @@ def update_current(today):
     """Fetch box scores for every finished game this season not yet cached."""
     cur = pd.read_parquet(CUR) if os.path.exists(CUR) else pd.DataFrame()
     have = set(cur.game_id.unique()) if len(cur) else set()
-    new, day = [], SEASON_START
+    day = SEASON_START
+    if len(cur):
+        day = max(SEASON_START, pd.to_datetime(cur.game_date).max().date() - datetime.timedelta(days=2))
+    log_p = os.path.join(DATA, 'picks_log.csv')
+    if os.path.exists(log_p):
+        lg = pd.read_csv(log_p, usecols=['date', 'result'])
+        open_dates = pd.to_datetime(lg[lg.result.isna()].date, errors='coerce').dropna()
+        if len(open_dates):
+            day = max(SEASON_START, min(day, open_dates.min().date() - datetime.timedelta(days=1)))
+    new = []
     while day < today + datetime.timedelta(days=1):
         try:
             sb = scoreboard(day)

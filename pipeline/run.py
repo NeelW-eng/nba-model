@@ -1,4 +1,5 @@
-"""Daily pipeline. Every run: refresh this season's box scores, grade finished picks, pull Underdog lines and
+"""Daily pipeline (modes: am = retrain + full run; pretip / refresh = grade finished games and rescore
+the rest with the saved models). Every run: refresh this season's box scores, grade finished picks, pull Underdog lines and
 the injury report, score every line, log the slate's picks, and write data/board.json + site/tipoff_edge.html.
 Models retrain when older than 18 hours (the morning run); the pre-tip run reuses them."""
 import os, sys, json, pickle, datetime, traceback

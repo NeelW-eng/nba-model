@@ -145,10 +145,10 @@ svg text{fill:var(--muted);font:11px var(--mono)}
 <div class="wrap">
   <header>
     <span class="clock" aria-hidden="true">24</span>
-    <span class="eyebrow">NBA · Underdog pick'em · refreshes each morning and before tip-off</span>
+    <span class="eyebrow">NBA · Underdog pick'em · refreshes each morning, before tip-off, and when you press Update now</span>
     <h1>Tip-Off Edge</h1>
     <div class="row" id="status"></div>
-    <div class="row"><button type="button" class="primary" id="reload">↻ Reload picks</button><span id="reload-note" class="muted" style="font-size:13px">Connecting…</span></div>
+    <div class="row"><button type="button" class="primary" id="reload">↻ Update now</button><span id="reload-note" class="muted" style="font-size:13px">Connecting…</span></div>
   </header>
 
   <section>
@@ -463,10 +463,13 @@ $('ent-list').addEventListener('click', async ev => {
   } catch (e) { $('ent-msg').textContent = 'Could not update that entry. Try again in a moment.'; }
 });
 
-/* ---------- live board ---------- */
+/* ---------- live board + Update now ---------- */
+// "Update now" fires a scheduled task that grades finished games and rescores games that haven't tipped,
+// then writes the new board here. board/refresh carries its progress.
+const TRIGGER = 'trig_01UY2WzvqEvHLy7VPkVKUJbb';
 const btn = $('reload'), note = $('reload-note');
-let boardRef = null, linesRef = null, projRef = null, shownGen = EMBEDDED.generated;
-const stamp = () => new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+let boardRef = null, linesRef = null, projRef = null, refreshRef = null, refreshDoc = null, mcp = null, shownGen = EMBEDDED.generated, flash = '';
+const stamp = (d = new Date()) => new Date(d).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
 let parts = {};
 function applyPart(name, snap) {
   if (!snap || !snap.exists) return;
@@ -475,30 +478,69 @@ function applyPart(name, snap) {
   if (d.generated !== shownGen) return;   // the matching picks document will merge it
   if (name === 'lines') { D.lines = d.lines; drawAll(); } else { D.proj = d.proj; drawProj(); }
 }
-function apply(snap, manual) {
-  if (snap && snap.exists) {
-    const data = snap.data(), newer = data.generated && data.generated !== shownGen;
-    if (newer || manual) {
-      shownGen = data.generated;
-      const next = {...data, lines: (parts.lines && parts.lines.generated === data.generated) ? parts.lines.lines : D.lines, proj: (parts.proj && parts.proj.generated === data.generated) ? parts.proj.proj : D.proj};
-      render(next);
-    }
-    note.textContent = (newer ? 'New picks loaded · ' : 'Up to date · ') + 'checked ' + stamp();
-  } else if (manual) note.textContent = 'Up to date · checked ' + stamp();
+function apply(snap) {
+  if (!snap || !snap.exists) return;
+  const data = snap.data();
+  if (!data.generated || data.generated === shownGen) return;
+  shownGen = data.generated;
+  render({...data, lines: (parts.lines && parts.lines.generated === data.generated) ? parts.lines.lines : D.lines,
+          proj: (parts.proj && parts.proj.generated === data.generated) ? parts.proj.proj : D.proj});
+  flash = 'New picks and results loaded · ' + stamp();
+  showRefresh();
 }
+function busy(r) {
+  if (!r || !(r.state === 'requested' || r.state === 'running')) return false;
+  const t = Date.parse(r.state === 'running' ? r.started_at : r.requested_at);
+  return Number.isFinite(t) && Date.now() - t < (r.state === 'running' ? 20 : 6) * 60e3;
+}
+function showRefresh() {
+  const r = refreshDoc, on = busy(r);
+  btn.disabled = on;
+  btn.textContent = on ? 'Updating…' : '↻ Update now';
+  if (on && r.state === 'requested') note.textContent = 'Update requested · starting up (usually 3–6 minutes in all)';
+  else if (on) note.textContent = 'Grading finished games and rescoring the rest · started ' + stamp(r.started_at);
+  else if (r && r.state === 'failed' && Date.now() - Date.parse(r.finished_at || 0) < 60 * 60e3) note.textContent = 'Last update failed: ' + (r.message || 'try again in a few minutes.');
+  else if (flash) note.textContent = flash;
+  else note.textContent = `Picks from ${stamp(D.generated)}` + (r && r.state === 'done' && r.finished_at ? ` · last update ${stamp(r.finished_at)}` : '');
+}
+setInterval(showRefresh, 30e3);   // a request that never started frees the button after a few minutes
 btn.addEventListener('click', async () => {
-  btn.disabled = true; btn.textContent = 'Checking…';
-  try { if (boardRef) { applyPart('lines', await linesRef.get()); applyPart('proj', await projRef.get()); apply(await boardRef.get(), true); } else note.textContent = 'Live updates unavailable here · showing the last published picks'; }
-  catch (e) { note.textContent = 'Could not reach the latest picks. Try again in a moment.'; }
-  finally { btn.disabled = false; btn.textContent = '↻ Reload picks'; }
+  if (!mcp) {   // no connector in this view: just re-read what's saved
+    btn.disabled = true;
+    try { if (boardRef) { applyPart('lines', await linesRef.get()); applyPart('proj', await projRef.get()); apply(await boardRef.get()); note.textContent = 'Checked ' + stamp() + ' · updating from here needs the page open in Claude'; } else note.textContent = 'Showing the last published picks'; }
+    catch (e) { note.textContent = 'Could not reach the latest picks. Try again in a moment.'; }
+    finally { btn.disabled = false; }
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Starting…'; flash = '';
+  try {
+    if (refreshRef) { try { await refreshRef.set({state: 'requested', requested_at: new Date().toISOString()}); } catch (e) {} }
+    await mcp.callTool('Claude Code Remote', 'fire_trigger', {trigger_id: TRIGGER}, {cache: false});
+    if (!refreshRef) note.textContent = 'Update started · new picks appear here in about 3–6 minutes';
+  } catch (e) {
+    const code = e && e.code;
+    if (refreshRef) { try { await refreshRef.set({state: 'idle', finished_at: new Date().toISOString()}); } catch (_) {} }
+    btn.disabled = false; btn.textContent = '↻ Update now';
+    if (code === 'not_in_manifest' || code === 'approval_required' || code === 'consent_required')
+      note.textContent = 'Updating needs your OK to use Claude Code Remote from this page. Press Update now and choose Allow.';
+    else if (code === 'server_not_connected' || code === 'needs_reauth' || code === 'selection_required')
+      note.textContent = 'Claude Code Remote isn’t available in this view, so the page can’t start an update. Open it in Claude, or wait for the next scheduled update.';
+    else if (code === 'tool_error')
+      note.textContent = 'The update task refused to start: ' + String(e.message || '').slice(0, 140);
+    else
+      note.textContent = 'The update may have started anyway. If nothing changes here in a few minutes, press Update now again.';
+  }
 });
 (async () => {
   const db = window.claude && window.claude.use ? await window.claude.use('db') : null;
+  mcp = window.claude && window.claude.use ? await window.claude.use('mcp') : null;
   if (!db) { note.textContent = 'Showing the last published picks'; $('ent-msg').textContent = 'Entry logging works on the published page in Claude.'; return; }
-  boardRef = db.doc('board/current'); linesRef = db.doc('board/lines'); projRef = db.doc('board/proj');
+  boardRef = db.doc('board/current'); linesRef = db.doc('board/lines'); projRef = db.doc('board/proj'); refreshRef = db.doc('board/refresh');
   linesRef.onSnapshot(s => applyPart('lines', s), () => {});
   projRef.onSnapshot(s => applyPart('proj', s), () => {});
-  boardRef.onSnapshot(s => apply(s, false), () => { note.textContent = 'Live updates paused · use Reload'; });
+  boardRef.onSnapshot(s => apply(s), () => { note.textContent = 'Live updates paused · reload the page'; });
+  refreshRef.onSnapshot(s => { refreshDoc = s && s.exists ? s.data() : null; showRefresh(); }, () => {});
+  showRefresh();
   entCol = db.collection('entries');
   entCol.onSnapshot(q => { entries = q.docs.map(d => ({id: d.id, ...d.data()})); drawEntries(); }, () => { $('ent-msg').textContent = 'Entries could not load. Reload the page to try again.'; });
 })();

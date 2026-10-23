@@ -55,8 +55,8 @@ def grade(box_cur, now):
     for i, r in d.iterrows():
         if isinstance(r.result, str) and r.result in ('win', 'loss', 'push', 'void'):
             continue
-        if pd.to_datetime(r.kickoff, utc=True) > pd.Timestamp(now) - pd.Timedelta(hours=3):
-            continue
+        if pd.to_datetime(r.kickoff, utc=True) > pd.Timestamp(now):
+            continue   # not started; box scores only hold finished games, so anything found below is final
         key = (int(r.pid), str(r.date))
         if key not in by:
             if (r.team, str(r.date)) in team_done:
